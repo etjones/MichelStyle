@@ -17,6 +17,7 @@ pillow = "^7.0"
 tensorflow = "^2.1"
 tensorflow-hub = "^0.7.0"
 tensorflow-estimator = "^2.1"
+moviepy = "^1.0"
 
 [tool.poetry.dev-dependencies]
 
