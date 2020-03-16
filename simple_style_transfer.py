@@ -1,7 +1,13 @@
 #! /usr/bin/env python
-
 '''
-MichelStyle, made by Remideza for Bend the Future single "Otaniemi"
+SimpleStyleTransfer - Transfer styles onto source frames, mixing between 
+successive style frames. 
+
+See https://github.com/tensorflow/magenta/tree/master/magenta/models/arbitrary_image_stylization
+for more specifics and greater customizability.
+
+Based on Remideza's MichelStyle project, https://github.com/Remideza/MichelStyle
+By Remideza, Evan Jones, 2020
 '''
 import argparse
 import os
@@ -25,13 +31,17 @@ class CVImage(np.ndarray): pass
 
 def main():
     args = parse_all_args()
-    total_elapsed = style_video(source_dir_or_image=args.source, styles_dir=args.styles, output_dir=args.output_frames)    
+    total_elapsed = style_video(source_dir_or_image=args.source, 
+                                styles_dir=args.styles, 
+                                output_dir=args.output_frames)    
     print(f'Wrote frames to {args.output_frames}')
 
     if args.video:
         vid_start = time.time()
-        output_path = write_video_file(args.frames, output_path=args.video, 
-                        fps=args.fps, audio_path=args.audio)
+        output_path = write_video_file(frames_dir=args.output_frames, 
+                                       output_path=args.video, 
+                                       fps=args.fps, 
+                                       audio_path=args.audio)
         total_elapsed += (time.time() - vid_start)
     print(f'Total time: {total_elapsed/60:.1f} minutes')
 
