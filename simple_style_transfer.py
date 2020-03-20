@@ -29,10 +29,12 @@ import PIL
 from typing import List, Dict, Sequence, Tuple, Any
 class CVImage(np.ndarray): pass 
 
+STYLE_SIZE = (256, 256)
+
 def main():
     args = parse_all_args()
     total_elapsed = style_video(source_dir_or_image=args.source, 
-                                styles_dir=args.styles, 
+                                styles_dir_or_tsv=args.styles, 
                                 output_dir=args.output_frames)    
     print(f'Wrote frames to {args.output_frames}')
 
@@ -62,9 +64,13 @@ def parse_all_args(args_in=None):
         'styles applied to them. Frame numbers start at 1. A single image may also '
         'be supplied'))
 
-    parser.add_argument( '--styles', type=Path, required=True,
+    parser.add_argument( '--styles', type=Path, required=False,
         help=('A directory containing image files to take styles from. Each '
         'image should have a number for the frame it should be most applied to '))
+
+    parser.add_argument( '-st', '--styles_tsv', type=Path, required=False,
+        help=('Patht to a tsv file describing which style images to apply to '
+        'which output frame. Format is:  "24\t/PATH/TO/IMAGE.png"'))
 
     parser.add_argument('-o','--output_frames', type=Path, default=Path('styled_frames'),
         help='Path to an output directory where stylized frames will be written.  Default: "%(default)s"')
@@ -91,21 +97,26 @@ def parse_all_args(args_in=None):
     # If args_in isn't specified, args will be taken from sys.argv
     args = parser.parse_args(args_in)
 
+    # Specified TSV file overrides styles directory
+    if args.styles_tsv:
+        args.styles = args.styles_tsv
+
     # Validation:
     if not args.source.exists():
-        raise 
+        raise ValueError(f"Specified source '{args.source}'' doesn't exist")
+    
 
     ensure_dir(args.output_frames)
 
     return args
 
 def style_video(source_dir_or_image: Path, 
-                styles_dir: Path, 
+                styles_dir_or_tsv: Path, 
                 output_dir:Path) -> float:
     total_start_time = time.time()
-    params = calculate_styling_params(source_dir_or_image, styles_dir)
-    print('Transferring styles...\n\n')
+    params = calculate_styling_params(source_dir_or_image, styles_dir_or_tsv)
     hub_module = get_tf_hub()
+    print('Transferring styles...\n\n')
 
     frame_count = len(params)
     style_images: Dict[Path, CVImage] = {}
@@ -121,8 +132,8 @@ def style_video(source_dir_or_image: Path,
         if not single_source_file:
             source_image = frame_image(source_path, as_float=True)
 
-        style_a_image = style_images.setdefault(style_a_path, frame_image(style_a_path))
-        style_b_image = style_images.setdefault(style_b_path, frame_image(style_a_path))
+        style_a_image = style_images.setdefault(style_a_path, frame_image(style_a_path, destination_size=STYLE_SIZE))
+        style_b_image = style_images.setdefault(style_b_path, frame_image(style_b_path, destination_size=STYLE_SIZE))
 
         stylized_image = transfer_styles(source_image, style_a_image, style_b_image, style_ratio, hub_module)
         stylized_image.save(output_path)
@@ -132,12 +143,20 @@ def style_video(source_dir_or_image: Path,
     return time.time() - total_start_time
 
 def calculate_styling_params(source_dir_or_image: Path, 
-                             styles_dir: Path,) -> Dict[int, Tuple[Path, Path, Path, float]]:
+                             styles_dir_or_tsv: Path,) -> Dict[int, Tuple[Path, Path, Path, float]]:
     params: Dict[int, Tuple[Path, Path, Path, float]] = {}
+    source_frame_paths: Dict[int, Path]
+    style_frame_paths: Dict[int, Path]
 
     # Figure out how many frames we'll need
     source_frame_paths = numbered_images_dict(source_dir_or_image)
-    style_frame_paths = numbered_images_dict(styles_dir)
+    if styles_dir_or_tsv.is_file():
+        style_frame_paths = parse_frames_tsv(styles_dir_or_tsv)
+    elif styles_dir_or_tsv.is_dir():
+        style_frame_paths = numbered_images_dict(styles_dir_or_tsv)
+    else:
+        raise ValueError(f'styles_dir_or_tsv should be a directory or a .tsv '
+                        'file. It is: {styles_dir_or_tsv}')
 
     style_frame_numbers = sorted(style_frame_paths.keys())
     source_frame_numbers = sorted(source_frame_paths.keys())
@@ -242,6 +261,8 @@ def write_video_file(frames_dir: Path, output_path: Path=None, fps=24, audio_pat
 # = HELPERS =
 # ===========
 def get_tf_hub():
+    # TODO: cache this ~80MB file somewhere so that every run doesn't download it again.
+    # OR maybe that already happens? See https://www.tensorflow.org/hub/tf2_saved_model
     TF_HUB = tensorflow_hub.load('https://tfhub.dev/google/magenta/arbitrary-image-stylization-v1-256/2')
     # importing hub_module prints some debug info to my screen. Remove that
     clear_screen()
@@ -311,12 +332,35 @@ def numbered_images_dict(a_dir: Path) -> Dict[int, Path]:
                 
     return result
 
-def frame_image(path:Path, as_float:bool = False) -> CVImage: 
+def frame_image(path:Path, as_float:bool = False, destination_size:Tuple[int, int]=None) -> CVImage: 
     img = cv2.imread(path.as_posix(), cv2.IMREAD_COLOR)
     if as_float:
         img = img.astype(np.float32)[np.newaxis, ...] / 255.0
+    if destination_size is not None:
+        img = cv2.resize(img, destination_size)
     return img
 
+def parse_frames_tsv(path:Path) -> Dict[int, Path]:
+    '''
+    Opens a file of the format:
+    1\t<path_to_style_img.[png|jpg]>\n
+    24\t<path_to_other_img.[png|jpg]>
+
+    and returns a dictionary of frame_number:Path entries
+    '''
+    result: Dict[int, Path] = {}
+    lines = path.read_text().splitlines()
+    for l in lines:
+        if len(l) > 1:
+            try:
+                frame_num, path_str = l.split('\t', maxsplit=1)
+                style_path = Path(path_str)
+                if not (style_path.exists() and style_path.is_file()):
+                    raise ValueError(f'File at ${style_path} not found')
+                result[int(frame_num)] = style_path
+            except Exception as e:
+                print(f'Exception {e}. Skipping line: "{l}"')
+    return result
 
 if __name__ == '__main__':
     main()
