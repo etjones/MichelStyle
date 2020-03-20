@@ -1,19 +1,14 @@
 [tool.poetry]
-name = "michelstyle"
+name = "simple_style_transfer"
 version = "0.1.0"
-description = "MichelStyle, made by Remideza for Bend the Future single \"Otaniemi\""
-authors = ["Rémi Pouchain"]
+description = "Apply styles from a series of images to a source video"
+authors = ["Rémi Pouchain", "Evan Jones"]
 license = "MIT"
 
 [tool.poetry.dependencies]
 python = "^3.7"
 opencv-python = "^4.2"
 pillow = "^7.0"
-# FIXME: As of 20200311, installing tensorflow 2.1.0 with poetry also includes
-# tensorflow-estimator, which fails on `import tensorflow` on my Mac.
-# Installing them instead with pip install -r requirements.txt` succeeds
-# -- etj
-
 tensorflow = "^2.1"
 tensorflow-hub = "^0.7.0"
 tensorflow-estimator = "^2.1"
